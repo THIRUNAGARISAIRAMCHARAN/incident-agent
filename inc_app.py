@@ -274,22 +274,30 @@ def apply_receipt(st, b):
 
 
 # ---------------- planning ----------------
+ERRORS = []
+
+
+def note_error(kind, detail):
+    ERRORS.append({"t": time.time(), "kind": kind, "detail": str(detail)[:600]})
+    del ERRORS[:-30]
+
+
 def make_plan(req, planner, model):
     t0 = time.monotonic()
     fb = None
-    last = None
     for attempt in range(2):
-        left = 14.0 - (time.monotonic() - t0)
-        if left < 3:
+        left = 16.0 - (time.monotonic() - t0)
+        if left < 4:
             break
         try:
-            raw = planner(inc_plan.model_prompt(req, fb), model, min(left - 1, 11.0))
+            raw = planner(inc_plan.model_prompt(req, fb), model, min(left - 1, 13.0))
             return inc_plan.validate_plan(raw, req)
         except ValueError as e:
-            fb, last = str(e)[:300], e
+            fb = str(e)[:300]
+            note_error("invalid_plan", e)
         except Exception as e:  # network / parse
-            last = e
             fb = None
+            note_error("model_call", repr(e))
     raise Err(502, "planner unavailable")
 
 
@@ -419,6 +427,8 @@ def get_app(db_path=None, planner=None, model=None):
                 await send({"type": "http.response.start", "status": 204, "headers": CORS})
                 await send({"type": "http.response.body", "body": b""})
                 return
+            if path == "/_debug/errors" and os.environ.get("DEBUG_KEY") and headers.get("x-debug-key") == os.environ["DEBUG_KEY"]:
+                return await reply(send, 200, ERRORS)
             if sub in ("", "/healthz") or path in ("/", "/healthz"):
                 return await reply(send, 200, {"ok": True})
             m = re.fullmatch(r"/v2/incidents(?:/([^/]+)(/receipts)?)?", sub)
