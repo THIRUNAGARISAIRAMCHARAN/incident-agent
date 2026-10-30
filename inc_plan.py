@@ -122,8 +122,43 @@ def _ids(lst, valid, lo, hi, what):
     return lst
 
 
+def _repair(raw, req):
+    """Fix harmless formatting slips (case, brackets, evidence subset) without changing meaning."""
+    if not isinstance(raw, dict):
+        return raw
+    raw = json.loads(json.dumps(raw))
+    low = {x.lower().strip(): x for x in req["incident"]["allowedRootCauses"]}
+    rc = raw.get("rootCause")
+    if isinstance(rc, str) and rc not in req["incident"]["allowedRootCauses"]:
+        raw["rootCause"] = low.get(rc.lower().strip(), rc)
+    valid = evidence_ids(req["incident"]["transcript"])
+
+    def clean(lst):
+        out = []
+        for x in lst if isinstance(lst, list) else []:
+            x = str(x).strip().strip("[]").strip()
+            if x in valid and x not in out:
+                out.append(x)
+        return out
+    ev = clean(raw.get("evidence"))[:4]
+    raw["evidence"] = ev
+    calls = list(raw.get("diagnostics") or []) if isinstance(raw.get("diagnostics"), list) else []
+    if isinstance(raw.get("effect"), dict):
+        calls.append(raw["effect"])
+    for c in calls:
+        if isinstance(c, dict):
+            if isinstance(c.get("toolName"), str):
+                c["toolName"] = c["toolName"].strip()
+            if not isinstance(c.get("arguments"), dict):
+                c["arguments"] = {}
+            ce = [x for x in clean(c.get("evidence")) if x in ev]
+            c["evidence"] = ce or ev[:1]
+    return raw
+
+
 def validate_plan(raw, req):
     """-> clean plan or ValueError(reason)."""
+    raw = _repair(raw, req)
     if not isinstance(raw, dict):
         raise ValueError("not an object")
     inc, pol = req["incident"], req["policy"]
